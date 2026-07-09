@@ -40,6 +40,18 @@ def _db() -> Session:
     return SessionLocal()
 
 
+def normalize_name(n: str) -> str:
+    n = n.lower().strip()
+    if n.startswith("dr."):
+        n = n[3:].strip()
+    elif n.startswith("dr "):
+        n = n[3:].strip()
+    elif n.startswith("dr"):
+        n = n[2:].strip()
+    n = n.replace(".", "").replace(",", "").replace("-", "")
+    return " ".join(n.split())
+
+
 EXTRACTION_SYSTEM_PROMPT = """You are a life-sciences CRM assistant. Extract structured
 data from a field representative's free-text or chat note about an HCP interaction.
 
@@ -92,20 +104,70 @@ def _extract_structured_data(raw_text: str) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 @tool
-def log_interaction(hcp_id: str, raw_text: str, channel: str = "chat") -> str:
+def log_interaction(
+    hcp_id: str,
+    raw_text: str,
+    channel: str = "chat",
+    interaction_type: Optional[str] = None,
+    sentiment: Optional[str] = None,
+    topics_discussed: Optional[Any] = None,
+    products_discussed: Optional[Any] = None,
+    samples_provided: Optional[Any] = None,
+) -> str:
     """Log a new HCP interaction. Pass the HCP's id and the rep's free-text
-    description of the interaction (from the chat conversation or a structured
-    form's 'notes' field). The LLM extracts a summary, topics, products,
-    sentiment, follow-up actions, and any samples provided, then persists the
-    interaction. Returns a JSON string with the new interaction_id and the
-    extracted fields so the agent can confirm details back to the user."""
+    description of the interaction (raw_text).
+    To optimize performance and avoid nested LLM latency, ALWAYS pass the
+    pre-extracted fields (interaction_type, sentiment, topics_discussed,
+    products_discussed, samples_provided) if you have them drafted in the conversation."""
     db = _db()
     try:
         hcp = db.query(HCP).filter(HCP.id == hcp_id).first()
         if not hcp:
             return json.dumps({"error": f"No HCP found with id {hcp_id}"})
 
-        extracted = _extract_structured_data(raw_text)
+        # Robustly parse list parameters to support either single values or arrays
+        topics = []
+        if topics_discussed:
+            if isinstance(topics_discussed, list):
+                topics = [str(x) for x in topics_discussed]
+            else:
+                topics = [str(topics_discussed)]
+
+        products = []
+        if products_discussed:
+            if isinstance(products_discussed, list):
+                products = [str(x) for x in products_discussed]
+            else:
+                products = [str(products_discussed)]
+
+        samples = []
+        if samples_provided:
+            if isinstance(samples_provided, list):
+                samples = samples_provided
+            elif isinstance(samples_provided, dict):
+                samples = [samples_provided]
+            else:
+                try:
+                    parsed = json.loads(samples_provided)
+                    if isinstance(parsed, list):
+                        samples = parsed
+                    elif isinstance(parsed, dict):
+                        samples = [parsed]
+                except Exception:
+                    samples = []
+
+        # Only call extraction if fields are missing
+        if not interaction_type or not sentiment or not topics or not products:
+            extracted = _extract_structured_data(raw_text)
+        else:
+            extracted = {
+                "interaction_type": interaction_type,
+                "sentiment": sentiment,
+                "topics_discussed": topics,
+                "products_discussed": products,
+                "samples_provided": samples,
+                "summary": raw_text[:280]
+            }
 
         # Ensure channel is valid for database Enum
         db_channel = channel if channel in ("structured_form", "chat") else "chat"
@@ -196,16 +258,15 @@ def edit_interaction(interaction_id: str, changes_text: str, edited_by: str = "f
             new_hcp_name = str(diff["hcp_name"]).strip()
             
             # Resolve by name
-            search_name = new_hcp_name.lower()
-            if search_name.startswith("dr."):
-                search_name = search_name[3:].strip()
-            elif search_name.startswith("dr "):
-                search_name = search_name[3:].strip()
-            
-            from sqlalchemy import func
-            resolved_hcp = db.query(HCP).filter(
-                func.lower(HCP.name).contains(search_name)
-            ).first()
+            normalized_search = normalize_name(new_hcp_name)
+            all_hcps = db.query(HCP).all()
+            resolved_hcp = None
+            for hcp in all_hcps:
+                norm_db_name = normalize_name(hcp.name)
+                if normalized_search and norm_db_name and (normalized_search in norm_db_name or norm_db_name in normalized_search):
+                    resolved_hcp = hcp
+                    break
+
             if resolved_hcp:
                 if interaction.hcp_id != resolved_hcp.id:
                     changed_fields["hcp_id"] = {"from": interaction.hcp_id, "to": resolved_hcp.id}
@@ -437,19 +498,16 @@ def resolve_hcp_by_name(name: str) -> str:
     Returns a JSON string containing the matching HCP's id and profile details, or an error if not found."""
     db = _db()
     try:
-        # Normalize the name search by stripping whitespace and common doctor prefixes
-        search_name = name.strip().lower()
-        if search_name.startswith("dr."):
-            search_name = search_name[3:].strip()
-        elif search_name.startswith("dr "):
-            search_name = search_name[3:].strip()
+        all_hcps = db.query(HCP).all()
+        normalized_search = normalize_name(name)
+        
+        matches = []
+        for hcp in all_hcps:
+            norm_db_name = normalize_name(hcp.name)
+            if normalized_search and norm_db_name and (normalized_search in norm_db_name or norm_db_name in normalized_search):
+                matches.append(hcp)
 
-        from sqlalchemy import func
-        hcps = db.query(HCP).filter(
-            func.lower(HCP.name).contains(search_name)
-        ).all()
-
-        if not hcps:
+        if not matches:
             return json.dumps({"error": f"No HCP found matching name '{name}'"})
 
         results = [
@@ -461,7 +519,7 @@ def resolve_hcp_by_name(name: str) -> str:
                 "email": hcp.email,
                 "phone": hcp.phone
             }
-            for hcp in hcps
+            for hcp in matches
         ]
         return json.dumps({"matches": results})
     finally:

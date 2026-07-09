@@ -11,7 +11,7 @@ load_dotenv()
 class Settings:
     # --- Groq / LLM ---
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
-    GROQ_CHAT_MODEL: str = os.getenv("GROQ_CHAT_MODEL", "gemma2-9b-it")
+    GROQ_CHAT_MODEL: str = os.getenv("GROQ_CHAT_MODEL", "llama-3.1-8b-instant")
     GROQ_REASONING_MODEL: str = os.getenv("GROQ_REASONING_MODEL", "llama-3.3-70b-versatile")
 
     # --- Database ---

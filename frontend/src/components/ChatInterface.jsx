@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { addUserMessage, sendMessage } from "../store/chatSlice";
+import { addUserMessage, sendMessage, resetChat } from "../store/chatSlice";
 
 export default function ChatInterface({ selectedHcpId }) {
   const dispatch = useDispatch();
@@ -19,11 +19,29 @@ export default function ChatInterface({ selectedHcpId }) {
     setDraft("");
   };
 
+  const handleButtonClick = (buttonText) => {
+    dispatch(addUserMessage(buttonText));
+    dispatch(sendMessage({ message: buttonText, hcpId: selectedHcpId }));
+  };
+
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
+  };
+
+  const parseMessageButtons = (content) => {
+    if (!content) return { cleanContent: "", buttons: [] };
+    const regex = /\[([^\]]+)\]/g;
+    const buttons = [];
+    let match;
+    while ((match = regex.exec(content)) !== null) {
+      buttons.push(match[1].trim());
+    }
+    // Clean content by removing all [Option Text] patterns and clean up trailing spaces/newlines
+    const cleanContent = content.replace(regex, "").trim();
+    return { cleanContent, buttons };
   };
 
   return (
@@ -36,16 +54,47 @@ export default function ChatInterface({ selectedHcpId }) {
             she wants the phase III data by Friday."
           </div>
         )}
-        {messages.map((m) => (
-          <div className={`msg ${m.role}`} key={m.id}>
-            {m.content}
-            {m.toolCalls && m.toolCalls.length > 0 && (
-              <div className="tool-note">
-                {m.toolCalls.map((tc) => tc.tool).join(" · ")}
+        {messages.map((m, idx) => {
+          const isAssistant = m.role === "assistant";
+          const isLast = idx === messages.length - 1;
+          
+          let displayContent = m.content;
+          let buttons = [];
+          
+          if (isAssistant) {
+            const parsed = parseMessageButtons(m.content);
+            displayContent = parsed.cleanContent;
+            if (isLast) {
+              buttons = parsed.buttons;
+            }
+          }
+
+          return (
+            <React.Fragment key={m.id}>
+              <div className={`msg ${m.role}`}>
+                {displayContent}
+                {m.toolCalls && m.toolCalls.length > 0 && (
+                  <div className="tool-note">
+                    {m.toolCalls.map((tc) => tc.tool).join(" · ")}
+                  </div>
+                )}
               </div>
-            )}
-          </div>
-        ))}
+              {buttons.length > 0 && (
+                <div className="chat-buttons">
+                  {buttons.map((btn, bIdx) => (
+                    <button
+                      key={bIdx}
+                      className="chat-btn"
+                      onClick={() => handleButtonClick(btn)}
+                    >
+                      {btn}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </React.Fragment>
+          );
+        })}
         {status === "loading" && <div className="msg assistant">Thinking…</div>}
       </div>
       <div className="chat-input-row">

@@ -34,6 +34,7 @@ const interactionsSlice = createSlice({
     lastSubmission: null,
     selectedInteraction: null,
     draftInteraction: null,
+    draftHcp: null,
     complianceWarnings: [],
     status: "idle",
     error: null,
@@ -44,6 +45,7 @@ const interactionsSlice = createSlice({
       state.selectedInteraction = null;
       state.lastSubmission = null;
       state.draftInteraction = null;
+      state.draftHcp = null;
     },
     selectInteraction(state, action) {
       state.selectedInteraction = action.payload;
@@ -85,6 +87,7 @@ const interactionsSlice = createSlice({
             state.lastSubmission = payloadState.interaction;
             state.selectedInteraction = payloadState.interaction;
             state.draftInteraction = null;
+            state.draftHcp = null;
             // Also prepend to history if it's not already in there to keep lists synced
             if (!state.history.some((h) => h.id === payloadState.interaction.id)) {
               state.history = [payloadState.interaction, ...state.history];
@@ -92,8 +95,16 @@ const interactionsSlice = createSlice({
           } else if (payloadState.draft_interaction) {
             state.draftInteraction = payloadState.draft_interaction;
           }
+          
+          if (payloadState.draft_hcp) {
+            state.draftHcp = payloadState.draft_hcp;
+          } else if (payloadState.hcp) {
+            state.draftHcp = null;
+          }
+
           if (payloadState.hcp) {
             state.selectedHcpId = payloadState.hcp.id;
+            state.draftHcp = null;
             const hcpIndex = state.hcps.findIndex((h) => h.id === payloadState.hcp.id);
             if (hcpIndex >= 0) {
               state.hcps[hcpIndex] = payloadState.hcp;

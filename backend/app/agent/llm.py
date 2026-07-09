@@ -1,7 +1,7 @@
 """
 Thin wrapper around the Groq API.
 
-- gemma2-9b-it        -> fast, cheap, used for the conversational agent loop
+- llama-3.1-8b-instant -> fast, cheap, used for the conversational agent loop
 - llama-3.3-70b-versatile -> heavier model, used when we need stronger
                              reasoning (e.g. resolving ambiguous edits,
                              complex multi-entity extraction)

@@ -4,9 +4,9 @@ import { useSelector } from "react-redux";
 export default function StructuredForm() {
   const { lastSubmission, selectedInteraction, draftInteraction, complianceWarnings, history } = useSelector((s) => s.interactions);
 
-  // If selectedInteraction or draftInteraction is active, render details. Otherwise, render empty/combined state.
   const isSelected = !!selectedInteraction || !!draftInteraction;
   const isDraft = !!draftInteraction && !selectedInteraction;
+
   const interaction = selectedInteraction || draftInteraction || {
     interaction_type: "",
     sentiment: "",
@@ -17,56 +17,75 @@ export default function StructuredForm() {
     samples_provided: [],
   };
 
+  const getPreferredType = () => {
+    if (!history || history.length === 0) return "—";
+    const counts = {};
+    history.forEach((h) => {
+      if (h.interaction_type) {
+        counts[h.interaction_type] = (counts[h.interaction_type] || 0) + 1;
+      }
+    });
+    const keys = Object.keys(counts);
+    if (keys.length === 0) return "—";
+    return keys.reduce((a, b) => (counts[a] > counts[b] ? a : b));
+  };
+
+  const lastInteraction = history && history.length > 0 ? history[0] : null;
+  const lastInteractionDate = lastInteraction
+    ? new Date(lastInteraction.interaction_date).toLocaleDateString("en-US", { day: 'numeric', month: 'short', year: 'numeric' })
+    : "—";
+
   const topicsStr = isSelected
-    ? (Array.isArray(interaction.topics_discussed)
+    ? (Array.isArray(interaction.topics_discussed) && interaction.topics_discussed.length > 0
         ? interaction.topics_discussed.join(", ")
-        : interaction.topics_discussed || "")
+        : interaction.topics_discussed && interaction.topics_discussed.length > 0 ? interaction.topics_discussed : "")
     : "";
 
   const productsStr = isSelected
-    ? (Array.isArray(interaction.products_discussed)
+    ? (Array.isArray(interaction.products_discussed) && interaction.products_discussed.length > 0
         ? interaction.products_discussed.join(", ")
-        : interaction.products_discussed || "")
+        : interaction.products_discussed && interaction.products_discussed.length > 0 ? interaction.products_discussed : "")
     : "";
 
   const samples = isSelected ? (interaction.samples_provided || []) : [];
 
-  // Generate combined summary of all interactions if no specific one is chosen
-  const getCombinedSummary = () => {
-    if (!history || history.length === 0) return "";
-    return history
-      .map((h) => {
-        const dateStr = h.interaction_date
-          ? new Date(h.interaction_date).toLocaleDateString()
-          : "—";
-        return `• [${dateStr} - ${h.interaction_type}] ${h.summary || "(no summary)"}`;
-      })
-      .join("\n");
-  };
+  if (!isSelected) {
+    // Mode 1: HCP Overview Mode
+    return (
+      <div>
+        <p className="section-title">Healthcare Professional Overview</p>
+        
+        <div className="compliance-banner" style={{ background: "var(--teal-dim)", color: "var(--teal)", marginBottom: "20px" }}>
+          Select any "Recent Interaction" above to view its detailed logs and raw notes.
+        </div>
 
-  const summaryValue = selectedInteraction
-    ? (interaction.summary || "")
-    : (draftInteraction?.summary || getCombinedSummary());
+        <div className="stats-grid">
+          <div className="stat-card">
+            <span className="stat-label">Total Interactions</span>
+            <span className="stat-value">{history.length}</span>
+          </div>
+          <div className="stat-card">
+            <span className="stat-label">Last Interaction</span>
+            <span className="stat-value" style={{ fontSize: "16px" }}>{lastInteractionDate}</span>
+          </div>
+          <div className="stat-card">
+            <span className="stat-label">Preferred Type</span>
+            <span className="stat-value" style={{ fontSize: "16px" }}>{getPreferredType()}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div>
       <p className="section-title">
-        {isDraft
-          ? "Interaction Details (Drafting Live...)"
-          : selectedInteraction
-          ? "Interaction Details (AI Populated)"
-          : "All Interactions Summary (HCP Overview)"}
+        {isDraft ? "Interaction Draft (Live Populating)" : "Interaction Details"}
       </p>
-
-      {!isSelected && (
-        <div className="compliance-banner" style={{ background: "var(--teal-dim)", color: "var(--teal)" }}>
-          Showing collective history. Click any "Recent Interaction" above to view its detailed logs and notes.
-        </div>
-      )}
 
       {isDraft && (
         <div className="compliance-banner" style={{ background: "rgba(0, 102, 102, 0.05)", color: "var(--teal)", border: "1px dashed rgba(0, 102, 102, 0.3)" }}>
-          AI Assistant is drafting interaction details live from the chat...
+          AI Assistant is extracting information from your conversation in real-time...
         </div>
       )}
 
@@ -80,46 +99,18 @@ export default function StructuredForm() {
 
       {selectedInteraction && lastSubmission?.id !== selectedInteraction.id && (
         <div className="compliance-banner ok">
-          Viewing logged interaction from {interaction.interaction_date ? new Date(interaction.interaction_date).toLocaleDateString() : "—"}.
+          Viewing logged interaction from {interaction.interaction_date ? new Date(interaction.interaction_date).toLocaleDateString("en-US", { day: 'numeric', month: 'short', year: 'numeric' }) : "—"}.
         </div>
       )}
 
-      <div className="row-2">
+      {/* Render generated Summary ONLY for saved interactions */}
+      {!isDraft && (
         <div className="field">
-          <label>Interaction Type</label>
-          <select value={interaction.interaction_type} disabled>
-            {!isSelected && <option value="">—</option>}
-            <option value="Meeting">Meeting</option>
-            <option value="Video Call">Video Call</option>
-            <option value="Email">Email</option>
-          </select>
-        </div>
-        <div className="field">
-          <label>Sentiment</label>
-          <select value={interaction.sentiment} disabled>
-            {!isSelected && <option value="">—</option>}
-            <option value="positive">Positive</option>
-            <option value="neutral">Neutral</option>
-            <option value="negative">Negative</option>
-          </select>
-        </div>
-      </div>
-
-      <div className="field">
-        <label>Summary</label>
-        {isSelected ? (
-          <input
-            type="text"
-            value={summaryValue}
-            readOnly
-            placeholder="AI-generated summary will appear here..."
-          />
-        ) : (
+          <label>Summary</label>
           <textarea
-            value={summaryValue}
+            value={interaction.summary || "—"}
             readOnly
-            rows={history.length > 2 ? Math.min(history.length, 6) : 3}
-            placeholder="No interactions logged yet for this doctor."
+            rows={3}
             style={{
               fontFamily: "inherit",
               fontSize: "13px",
@@ -128,7 +119,28 @@ export default function StructuredForm() {
               backgroundColor: "#fcfdfd"
             }}
           />
-        )}
+        </div>
+      )}
+
+      <div className="row-2">
+        <div className="field">
+          <label>Interaction Type</label>
+          <select value={interaction.interaction_type || ""} disabled>
+            <option value="">—</option>
+            <option value="Meeting">Meeting</option>
+            <option value="Video Call">Video Call</option>
+            <option value="Email">Email</option>
+          </select>
+        </div>
+        <div className="field">
+          <label>Sentiment</label>
+          <select value={interaction.sentiment || ""} disabled>
+            <option value="">—</option>
+            <option value="positive">Positive</option>
+            <option value="neutral">Neutral</option>
+            <option value="negative">Negative</option>
+          </select>
+        </div>
       </div>
 
       <div className="row-2">
@@ -136,18 +148,18 @@ export default function StructuredForm() {
           <label>Topics Discussed</label>
           <input
             type="text"
-            value={topicsStr}
+            value={topicsStr || "—"}
             readOnly
-            placeholder={isSelected ? "AI-extracted topics..." : "—"}
+            placeholder="—"
           />
         </div>
         <div className="field">
           <label>Products Discussed</label>
           <input
             type="text"
-            value={productsStr}
+            value={productsStr || "—"}
             readOnly
-            placeholder={isSelected ? "Products discussed or 'No Product Discussed'" : "—"}
+            placeholder="—"
           />
         </div>
       </div>
@@ -155,24 +167,27 @@ export default function StructuredForm() {
       <div className="field">
         <label>Detailed Notes</label>
         <textarea
-          value={interaction.raw_notes || ""}
+          value={interaction.raw_notes || "—"}
           readOnly
-          placeholder={isSelected ? "The rep's raw conversation notes will be displayed here..." : "—"}
+          placeholder="—"
+          rows={4}
         />
       </div>
 
-      {samples.length > 0 && (
-        <div className="field">
-          <label>Samples Provided</label>
-          <div style={{ marginTop: 6 }}>
+      <div className="field">
+        <label>Samples Provided</label>
+        {samples.length > 0 ? (
+          <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: "6px" }}>
             {samples.map((s, idx) => (
-              <div key={idx} className="chip">
+              <div key={idx} className="chip" style={{ backgroundColor: "#f0f0f0", color: "#333", border: "1px solid #ddd" }}>
                 {s.product} ({s.qty} units)
               </div>
             ))}
           </div>
-        </div>
-      )}
+        ) : (
+          <div style={{ color: "#888", fontSize: "13px", marginTop: "4px" }}>—</div>
+        )}
+      </div>
     </div>
   );
 }

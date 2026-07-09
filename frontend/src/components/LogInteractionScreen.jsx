@@ -6,7 +6,7 @@ import ChatInterface from "./ChatInterface.jsx";
 
 export default function LogInteractionScreen() {
   const dispatch = useDispatch();
-  const { hcps, selectedHcpId, history, selectedInteraction, lastSubmission } = useSelector((s) => s.interactions);
+  const { hcps, selectedHcpId, history, selectedInteraction, lastSubmission, draftHcp } = useSelector((s) => s.interactions);
   const [mode, setMode] = useState("form"); // "form" | "chat"
 
   // Initial load: fetch all doctors
@@ -28,7 +28,7 @@ export default function LogInteractionScreen() {
     dispatch(fetchHcps());
   }, [dispatch, lastSubmission]);
 
-  const selectedHcp = hcps.find((h) => h.id === selectedHcpId);
+  const selectedHcp = hcps.find((h) => h.id === selectedHcpId) || draftHcp;
 
   const capitalizeSpecialty = (s) => {
     if (!s) return "General";
@@ -58,7 +58,7 @@ export default function LogInteractionScreen() {
                 onChange={(e) => dispatch(selectHcp(e.target.value))}
               >
                 <option value="" disabled>
-                  Select or type name in chat to resolve…
+                  {draftHcp ? `${draftHcp.name} (Drafting...)` : "Select or type name in chat to resolve…"}
                 </option>
                 {hcps.map((h) => (
                   <option key={h.id} value={h.id}>
@@ -95,21 +95,28 @@ export default function LogInteractionScreen() {
                       key={h.id}
                       onClick={() => dispatch(selectInteraction(h))}
                       style={{
-                        padding: "6px 8px",
+                        padding: "8px",
                         fontSize: "12.5px",
                         cursor: "pointer",
                         borderRadius: "6px",
-                        marginBottom: "4px",
-                        backgroundColor: isActive ? "rgba(0, 102, 102, 0.08)" : "transparent",
-                        border: isActive ? "1px solid rgba(0, 102, 102, 0.2)" : "1px solid transparent",
+                        marginBottom: "6px",
+                        backgroundColor: isActive ? "rgba(0, 102, 102, 0.08)" : "#f9f9f9",
+                        border: isActive ? "1px solid rgba(0, 102, 102, 0.2)" : "1px solid #eee",
                         transition: "all 0.2s ease"
                       }}
                     >
-                      <div className="date" style={{ fontSize: "11px" }}>
-                        {h.interaction_date ? new Date(h.interaction_date).toLocaleDateString() : "—"} ·{" "}
-                        <span className="chip" style={{ padding: "1px 6px", fontSize: "10px", margin: 0 }}>{h.interaction_type}</span>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#666", fontWeight: 500 }}>
+                        <span>{h.interaction_date ? new Date(h.interaction_date).toLocaleDateString("en-US", { day: 'numeric', month: 'short', year: 'numeric' }) : "—"}</span>
+                        <span style={{ textTransform: "capitalize" }}>{h.sentiment}</span>
                       </div>
-                      <div style={{ marginTop: "3px", fontWeight: 500, color: "var(--ink)" }}>{h.summary || "(no summary)"}</div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "4px" }}>
+                        <span className="chip" style={{ padding: "2px 6px", fontSize: "10px", margin: 0, backgroundColor: "#e2f0f0", color: "#006666" }}>
+                          {h.interaction_type}
+                        </span>
+                      </div>
+                      <div style={{ marginTop: "6px", fontWeight: 500, color: "var(--ink)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {h.topics_discussed ? h.topics_discussed.join(", ") : h.summary || "—"}
+                      </div>
                     </div>
                   );
                 })}

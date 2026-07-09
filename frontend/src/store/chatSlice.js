@@ -26,6 +26,11 @@ const chatSlice = createSlice({
     addUserMessage(state, action) {
       state.messages.push({ id: nanoid(), role: "user", content: action.payload });
     },
+    resetChat(state) {
+      state.sessionId = nanoid();
+      state.messages = [];
+      state.status = "idle";
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -52,5 +57,5 @@ const chatSlice = createSlice({
   },
 });
 
-export const { addUserMessage } = chatSlice.actions;
+export const { addUserMessage, resetChat } = chatSlice.actions;
 export default chatSlice.reducer;
