@@ -14,6 +14,10 @@ class Settings:
     GROQ_CHAT_MODEL: str = os.getenv("GROQ_CHAT_MODEL", "llama-3.1-8b-instant")
     GROQ_REASONING_MODEL: str = os.getenv("GROQ_REASONING_MODEL", "llama-3.3-70b-versatile")
 
+    # --- Gemini / Google AI ---
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
+    GEMINI_CHAT_MODEL: str = os.getenv("GEMINI_CHAT_MODEL", "gemini-2.5-flash")
+
     # --- Database ---
     # Works with either Postgres or MySQL — just swap the URL scheme.
     # Postgres: postgresql+psycopg2://user:password@localhost:5432/hcp_crm
@@ -28,8 +32,11 @@ class Settings:
 
 settings = Settings()
 
-if not settings.GROQ_API_KEY:
+active_provider = "Gemini" if settings.GEMINI_API_KEY else "Groq"
+print(f"[INFO] LLM Provider: {active_provider}")
+
+if not settings.GEMINI_API_KEY and not settings.GROQ_API_KEY:
     print(
-        "[WARN] GROQ_API_KEY is not set. Add it to backend/.env — "
-        "see .env.example. The agent will fail on any LLM call until this is set."
+        "[WARN] Neither GEMINI_API_KEY nor GROQ_API_KEY is set. "
+        "Add one to backend/.env — the agent will fail on any LLM call until this is set."
     )

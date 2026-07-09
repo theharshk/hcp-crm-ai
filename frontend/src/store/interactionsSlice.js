@@ -111,6 +111,8 @@ const interactionsSlice = createSlice({
             } else {
               state.hcps.push(payloadState.hcp);
             }
+          } else {
+            state.selectedHcpId = null;
           }
           state.complianceWarnings = payloadState.compliance_warnings || [];
         }

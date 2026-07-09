@@ -58,9 +58,11 @@ Follow these sequential states:
    - Once the HCP draft is complete (contains name, specialty, institution), call add_hcp silently. This will return a real database UUID. Note: There is NO set_active_hcp tool; active state tracking is handled automatically in the backend. Proceed directly to the "Drafting" state once add_hcp completes.
    - Never call log_interaction using placeholders like "new HCP ID". Saving MUST block until a real database UUID is resolved.
 3. Drafting Interaction:
-   - Gather Type, Sentiment, Topics, Products, Detailed Notes, and Samples.
+   - Gather Type, Sentiment, Topics, Medications (which maps to products_discussed in tool calls), Detailed Notes, and Samples.
    - Ask only ONE concise follow-up question at a time.
-   - Interpret user intent naturally (e.g., "yes and no products discussed" means Products Discussed is "No Product Discussed", not "Yes").
+   - Interpret user intent naturally (e.g., "yes and no medications discussed" means Medications Discussed is "No Medication Discussed", not "Yes").
+   - Support draft corrections: If the user corrects any drafted interaction field (e.g. "Actually it was positive", "No, it was a video call", "Medication discussed was Drug B", "Topics discussed was heart disease"), interpret the change, update the draft state immediately, and confirm the update to the user. Do NOT ask duplicate questions for fields the user already specified.
+   - If medications are not mentioned, ask: "Were any medications discussed during the interaction? If yes, please name the medications. If no, let me know so I can record 'No Medication Discussed'."
 4. Awaiting Save Confirmation:
    - Once details are complete, ask: "Would you like me to save this interaction?" with buttons: [Save Interaction] [Discard].
 5. Submitting Interaction:
@@ -76,16 +78,16 @@ If user requests updates to an existing doctor's profile (after saving or separa
 - If user replies No, respond: "You're welcome! Would you like to log another HCP interaction? [Yes] [No]" and return to Idle.
 
 EXTRACTION & PLANNING GUIDELINES:
-- Always perform entity extraction on the entire user input first. Extract names, specialty, institution, interaction type, topics, products, notes, and samples.
+- Always perform entity extraction on the entire user input first. Extract names, specialty, institution, interaction type, topics, medications (products), notes, and samples.
 - If the user provides a detailed, information-rich message (e.g., "Had an email with Dr Lisa Cuddyy from Princeton Plainbro..."), extract ALL available entities into the draft first.
 - Tolerate minor spelling mistakes or typos. Do NOT repeatedly ask the user to confirm minor spelling mistakes unless the meaning is genuinely ambiguous. If the user misspells "Prinston" or "Lisa Cuddyy", extract the most likely intended value (e.g., "Princeton", "Lisa Cuddy") into the draft.
 - Determine only the missing required fields after extraction.
 - Execute at most one tool call per conversation turn. If a tool call has already run or failed, do NOT attempt to run it again or call another tool in the same turn. Instead, generate a natural response asking for the missing details or confirmation.
 
 CRITICAL RULES:
+- ALWAYS call tools natively using the API's function-calling mechanism. NEVER write tool names, tool parameters, or XML function tags (like '<function=...>') in your text replies to the user. Let the API handle tool execution.
 - NEVER display, write, or leak database UUIDs, IDs, or 36-character hex strings in your replies to the user. Keep them entirely internal to your tool calls.
 - NEVER mention tool or function names (such as log_interaction, resolve_hcp_by_name, add_hcp, enrich_hcp_profile, etc.) in your replies.
-- NEVER output raw XML-like or custom function tags (e.g. '<function=...>') in your text replies. Let the API handle tool call formatting natively.
 - Use brackets to output option buttons at the end of your replies when options are available (e.g. "[Yes, create profile] [No, check name again]"). Put each option inside square brackets.
 """
 
@@ -113,22 +115,44 @@ def _has_resolved_hcp(messages: list) -> bool:
 
 
 def _build_llm(messages: list):
-    llm = ChatGroq(
-        api_key=settings.GROQ_API_KEY,
-        model=settings.GROQ_CHAT_MODEL,
-        temperature=0.0,
-    )
-    if _has_resolved_hcp(messages):
-        return llm.bind_tools(ALL_TOOLS, parallel_tool_calls=False)
+    if settings.GEMINI_API_KEY:
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        llm = ChatGoogleGenerativeAI(
+            google_api_key=settings.GEMINI_API_KEY,
+            model=settings.GEMINI_CHAT_MODEL,
+            temperature=0.0,
+        )
+        if _has_resolved_hcp(messages):
+            return llm.bind_tools(ALL_TOOLS)
+        else:
+            # Only bind lookup and creation tools to prevent premature calls of compliance/logging tools
+            lookup_tools = [resolve_hcp_by_name, add_hcp]
+            return llm.bind_tools(lookup_tools)
     else:
-        # Only bind lookup and creation tools to prevent premature calls of compliance/logging tools
-        lookup_tools = [resolve_hcp_by_name, add_hcp]
-        return llm.bind_tools(lookup_tools, parallel_tool_calls=False)
+        llm = ChatGroq(
+            api_key=settings.GROQ_API_KEY,
+            model=settings.GROQ_CHAT_MODEL,
+            temperature=0.0,
+        )
+        if _has_resolved_hcp(messages):
+            return llm.bind_tools(ALL_TOOLS, parallel_tool_calls=False)
+        else:
+            # Only bind lookup and creation tools to prevent premature calls of compliance/logging tools
+            lookup_tools = [resolve_hcp_by_name, add_hcp]
+            return llm.bind_tools(lookup_tools, parallel_tool_calls=False)
 
 
 def _agent_node(state: AgentState):
     llm = _build_llm(state["messages"])
-    messages = [SystemMessage(content=SYSTEM_PROMPT)] + list(state["messages"])
+    system_contents = [SYSTEM_PROMPT]
+    other_messages = []
+    for m in state["messages"]:
+        if isinstance(m, SystemMessage):
+            system_contents.append(m.content)
+        else:
+            other_messages.append(m)
+    combined_system = SystemMessage(content="\n\n".join(system_contents))
+    messages = [combined_system] + other_messages
     response = llm.invoke(messages)
     return {"messages": [response]}
 
@@ -239,6 +263,31 @@ def run_agent_turn(history: list[dict], user_message: str, active_hcp_id: Option
 
     messages: list[BaseMessage] = []
     
+    # Detect if user is switching doctors mid-conversation
+    if active_hcp_id:
+        db = SessionLocal()
+        try:
+            hcp = db.query(HCP).filter(HCP.id == active_hcp_id).first()
+            if hcp:
+                from app.agent.tools import normalize_name
+                norm_active = normalize_name(hcp.name)
+                user_msg_lower = user_message.lower()
+                user_words = user_msg_lower.replace(".", "").replace(",", "").split()
+                
+                # Check for switch indicator phrases or new name mentions
+                has_switch_phrase = any(p in user_msg_lower for p in ["it was", "no it", "no no", "actually", "met dr", "met doctor"])
+                if has_switch_phrase or "dr" in user_words or "doctor" in user_words:
+                    for word in user_words:
+                        if word not in ["dr", "dr.", "doctor", "no", "it", "was", "actually", "met", "today", "maybe"] and len(word) > 3:
+                            if word not in norm_active:
+                                print(f"[TIMING] Detected doctor switch from '{hcp.name}' in user message: '{user_message}'", flush=True)
+                                active_hcp_id = None
+                                break
+        except Exception as ex:
+            print(f"[ERROR] Switch check failed: {ex}", flush=True)
+        finally:
+            db.close()
+
     # Inject active HCP context at the top of history
     if active_hcp_id:
         db = SessionLocal()

@@ -16,7 +16,7 @@ ToolNode can bind and invoke them directly from the agent's model output.
 """
 import json
 import datetime as dt
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Union
 
 from langchain_core.tools import tool
 from sqlalchemy.orm import Session
@@ -66,9 +66,9 @@ Return ONLY valid JSON with these keys:
   "samples_provided": [{"product": "...", "qty": 0}]
 }
 
-Rules for Products Discussed:
-- If the representative states or implies no products were discussed (or "n/a", "no products", "none"), set "products_discussed" to ["No Product Discussed"].
-- If no products are mentioned in the text at all, set "products_discussed" to ["No Product Discussed"].
+Rules for Medications Discussed:
+- If the representative states or implies no medications were discussed (or "n/a", "no medications", "none"), set "products_discussed" to ["No Medication Discussed"].
+- If no medications are mentioned in the text at all, set "products_discussed" to ["No Medication Discussed"].
 
 No prose outside the JSON."""
 
@@ -110,9 +110,9 @@ def log_interaction(
     channel: str = "chat",
     interaction_type: Optional[str] = None,
     sentiment: Optional[str] = None,
-    topics_discussed: Optional[Any] = None,
-    products_discussed: Optional[Any] = None,
-    samples_provided: Optional[Any] = None,
+    topics_discussed: Optional[Union[List[str], str]] = None,
+    products_discussed: Optional[Union[List[str], str]] = None,
+    samples_provided: Optional[Union[List[dict], str, dict]] = None,
 ) -> str:
     """Log a new HCP interaction. Pass the HCP's id and the rep's free-text
     description of the interaction (raw_text).
@@ -239,8 +239,8 @@ def edit_interaction(interaction_id: str, changes_text: str, edited_by: str = "f
             f"\"{changes_text}\"\n\n"
             "Return ONLY a JSON object containing just the fields that should be "
             "updated (same schema/keys as the current record), with their new values. "
-            "For products_discussed, if the user explicitly requests no products or clears the products, "
-            "set it to [\"No Product Discussed\"]."
+            "For products_discussed, if the user explicitly requests no medications or clears the medications, "
+            "set it to [\"No Medication Discussed\"]."
         )
         raw = reasoning_completion(
             messages=[
@@ -382,7 +382,7 @@ MAX_SAMPLES_PER_VISIT = 20
 
 
 @tool
-def check_compliance(hcp_id: str, samples_provided: Optional[Any] = None) -> str:
+def check_compliance(hcp_id: str, samples_provided: Optional[Union[List[dict], str, dict]] = None) -> str:
     """Run a lightweight compliance check for an HCP interaction before or
     after logging: flags if sample quantities exceed configured limits, or if
     this HCP has already been visited too many times this month. Returns a

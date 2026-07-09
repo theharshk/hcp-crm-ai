@@ -154,7 +154,7 @@ export default function StructuredForm() {
           />
         </div>
         <div className="field">
-          <label>Products Discussed</label>
+          <label>Medications Discussed</label>
           <input
             type="text"
             value={productsStr || "—"}
