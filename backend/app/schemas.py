@@ -83,6 +83,8 @@ class ChatRequest(BaseModel):
     session_id: str
     message: str
     history: Optional[List[ChatMessage]] = []
+    draft_interaction: Optional[Dict[str, Any]] = None
+
 
 
 class ChatResponse(BaseModel):

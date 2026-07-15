@@ -16,6 +16,10 @@ from app.config import settings
 
 def chat_completion(messages: list[dict], model: str | None = None, temperature: float = 0.0) -> str:
     """Route LLM completion through Gemini if API key is set, else fall back to Groq."""
+    # Filter out any messages with None or empty content to prevent API 400 errors
+    safe_messages = [m for m in messages if m.get("content") not in (None, "", [])]
+    if not safe_messages:
+        return ""
     if settings.GEMINI_API_KEY:
         genai.configure(api_key=settings.GEMINI_API_KEY)
         target_model = model or settings.GEMINI_CHAT_MODEL
@@ -25,7 +29,7 @@ def chat_completion(messages: list[dict], model: str | None = None, temperature:
         )
         # Convert OpenAI-style messages list to a single prompt string
         prompt_parts = []
-        for m in messages:
+        for m in safe_messages:
             role = m.get("role", "user").upper()
             content = m.get("content", "")
             if role == "SYSTEM":
@@ -39,7 +43,7 @@ def chat_completion(messages: list[dict], model: str | None = None, temperature:
         client = Groq(api_key=settings.GROQ_API_KEY)
         response = client.chat.completions.create(
             model=model or settings.GROQ_CHAT_MODEL,
-            messages=messages,
+            messages=safe_messages,
             temperature=temperature,
         )
         return response.choices[0].message.content

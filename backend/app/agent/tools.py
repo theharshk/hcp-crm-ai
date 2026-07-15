@@ -156,9 +156,19 @@ def log_interaction(
                 except Exception:
                     samples = []
 
-        # Only call extraction if fields are missing
+        # Only call extraction if fields are missing, but merge with explicit parameters
         if not interaction_type or not sentiment or not topics or not products:
             extracted = _extract_structured_data(raw_text)
+            if interaction_type:
+                extracted["interaction_type"] = interaction_type
+            if sentiment:
+                extracted["sentiment"] = sentiment
+            if topics:
+                extracted["topics_discussed"] = topics
+            if products:
+                extracted["products_discussed"] = products
+            if samples:
+                extracted["samples_provided"] = samples
         else:
             extracted = {
                 "interaction_type": interaction_type,
@@ -166,7 +176,7 @@ def log_interaction(
                 "topics_discussed": topics,
                 "products_discussed": products,
                 "samples_provided": samples,
-                "summary": raw_text[:280]
+                "summary": raw_text[:280] if raw_text else "Meeting details."
             }
 
         # Ensure channel is valid for database Enum
@@ -257,15 +267,22 @@ def edit_interaction(interaction_id: str, changes_text: str, edited_by: str = "f
         if "hcp_name" in diff and diff["hcp_name"]:
             new_hcp_name = str(diff["hcp_name"]).strip()
             
-            # Resolve by name
+            # Resolve by name (with substring and fuzzy fallback matching)
+            import difflib
             normalized_search = normalize_name(new_hcp_name)
             all_hcps = db.query(HCP).all()
             resolved_hcp = None
             for hcp in all_hcps:
                 norm_db_name = normalize_name(hcp.name)
-                if normalized_search and norm_db_name and (normalized_search in norm_db_name or norm_db_name in normalized_search):
-                    resolved_hcp = hcp
-                    break
+                if normalized_search and norm_db_name:
+                    if normalized_search in norm_db_name or norm_db_name in normalized_search:
+                        resolved_hcp = hcp
+                        break
+                    else:
+                        ratio = difflib.SequenceMatcher(None, normalized_search, norm_db_name).ratio()
+                        if ratio > 0.82:
+                            resolved_hcp = hcp
+                            break
 
             if resolved_hcp:
                 if interaction.hcp_id != resolved_hcp.id:
@@ -447,11 +464,28 @@ def add_hcp(
     Returns a JSON string containing the newly created HCP's profile details including their database UUID (id)."""
     db = _db()
     try:
-        # Check if an HCP with the same name already exists to prevent duplicate seeding
-        existing = db.query(HCP).filter(HCP.name == name).first()
+        # Check if an HCP with the same name and specialty already exists (normalized) to prevent duplicate profiles
+        from app.agent.tools import normalize_name
+        norm_name = normalize_name(name)
+        norm_spec = normalize_name(specialty) if specialty else ""
+        
+        all_hcps = db.query(HCP).all()
+        existing = None
+        for h in all_hcps:
+            norm_db_name = normalize_name(h.name)
+            if norm_db_name == norm_name:
+                if norm_spec:
+                    norm_db_spec = normalize_name(h.specialty) if h.specialty else ""
+                    if norm_db_spec == norm_spec:
+                        existing = h
+                        break
+                else:
+                    existing = h
+                    break
+
         if existing:
             return json.dumps({
-                "message": f"HCP with name '{name}' already exists.",
+                "message": f"HCP with name '{name}' already exists in the database.",
                 "hcp": {
                     "id": existing.id,
                     "name": existing.name,
@@ -501,11 +535,17 @@ def resolve_hcp_by_name(name: str) -> str:
         all_hcps = db.query(HCP).all()
         normalized_search = normalize_name(name)
         
+        import difflib
         matches = []
         for hcp in all_hcps:
             norm_db_name = normalize_name(hcp.name)
-            if normalized_search and norm_db_name and (normalized_search in norm_db_name or norm_db_name in normalized_search):
-                matches.append(hcp)
+            if normalized_search and norm_db_name:
+                if normalized_search in norm_db_name or norm_db_name in normalized_search:
+                    matches.append(hcp)
+                else:
+                    ratio = difflib.SequenceMatcher(None, normalized_search, norm_db_name).ratio()
+                    if ratio > 0.82:
+                        matches.append(hcp)
 
         if not matches:
             return json.dumps({"error": f"No HCP found matching name '{name}'"})

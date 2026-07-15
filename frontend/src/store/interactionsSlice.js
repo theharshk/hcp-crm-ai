@@ -5,6 +5,10 @@ export const fetchHcps = createAsyncThunk("interactions/fetchHcps", async () => 
   return api.listHcps();
 });
 
+export const createHcp = createAsyncThunk("interactions/createHcp", async (payload) => {
+  return api.createHcp(payload);
+});
+
 export const fetchHistory = createAsyncThunk("interactions/fetchHistory", async (hcpId) => {
   return api.listInteractions(hcpId);
 });
@@ -56,6 +60,15 @@ const interactionsSlice = createSlice({
       .addCase(fetchHcps.fulfilled, (state, action) => {
         state.hcps = action.payload;
       })
+      .addCase(createHcp.fulfilled, (state, action) => {
+        state.hcps.push(action.payload);
+        state.selectedHcpId = action.payload.id;
+        state.selectedInteraction = null;
+        state.lastSubmission = null;
+        state.draftInteraction = null;
+        state.draftHcp = null;
+        state.history = [];
+      })
       .addCase(fetchHistory.fulfilled, (state, action) => {
         state.history = action.payload;
       })
@@ -83,6 +96,20 @@ const interactionsSlice = createSlice({
       .addCase("chat/sendMessage/fulfilled", (state, action) => {
         const payloadState = action.payload.state;
         if (payloadState) {
+          const isNewDoctorDraft = !!payloadState.draft_hcp;
+          const isDoctorSwitched = payloadState.hcp && payloadState.hcp.id !== state.selectedHcpId;
+          
+          if (isNewDoctorDraft || isDoctorSwitched) {
+            state.selectedInteraction = null;
+            state.draftInteraction = null;
+            state.complianceWarnings = [];
+            // If a new doctor is being drafted (not yet in DB), clear the panel
+            // so the old doctor's profile card doesn't confusingly remain on screen
+            if (isNewDoctorDraft && !isDoctorSwitched) {
+              state.selectedHcpId = null;
+              state.history = [];
+            }
+          }
           if (payloadState.interaction) {
             state.lastSubmission = payloadState.interaction;
             state.selectedInteraction = payloadState.interaction;
@@ -94,6 +121,10 @@ const interactionsSlice = createSlice({
             }
           } else if (payloadState.draft_interaction) {
             state.draftInteraction = payloadState.draft_interaction;
+            state.selectedInteraction = null;
+          } else {
+            state.selectedInteraction = null;
+            state.draftInteraction = null;
           }
           
           if (payloadState.draft_hcp) {
@@ -109,11 +140,13 @@ const interactionsSlice = createSlice({
             if (hcpIndex >= 0) {
               state.hcps[hcpIndex] = payloadState.hcp;
             } else {
+              // New doctor created via chat — add to list
               state.hcps.push(payloadState.hcp);
             }
-          } else {
-            state.selectedHcpId = null;
           }
+          // NOTE: We intentionally do NOT clear selectedHcpId when payloadState.hcp is null
+          // UNLESS a new draft_hcp is in progress (handled above), so that the panel goes blank
+          // rather than keeping the old doctor visible.
           state.complianceWarnings = payloadState.compliance_warnings || [];
         }
       });

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { fetchHcps, fetchHistory, selectHcp, selectInteraction } from "../store/interactionsSlice";
+import { fetchHcps, fetchHistory, selectHcp, selectInteraction, createHcp } from "../store/interactionsSlice";
 import StructuredForm from "./StructuredForm.jsx";
 import ChatInterface from "./ChatInterface.jsx";
 
@@ -8,6 +8,16 @@ export default function LogInteractionScreen() {
   const dispatch = useDispatch();
   const { hcps, selectedHcpId, history, selectedInteraction, lastSubmission, draftHcp } = useSelector((s) => s.interactions);
   const [mode, setMode] = useState("form"); // "form" | "chat"
+  const [showModal, setShowModal] = useState(false);
+  const [newHcpData, setNewHcpData] = useState({ name: "", specialty: "", institution: "", email: "", phone: "" });
+
+  const handleCreateHcp = (e) => {
+    e.preventDefault();
+    if (!newHcpData.name.trim()) return;
+    dispatch(createHcp(newHcpData));
+    setShowModal(false);
+    setNewHcpData({ name: "", specialty: "", institution: "", email: "", phone: "" });
+  };
 
   // Initial load: fetch all doctors
   useEffect(() => {
@@ -52,20 +62,41 @@ export default function LogInteractionScreen() {
             {/* HCP Profile */}
             <div className="card hcp-card">
               <p className="section-title">Healthcare Professional Profile</p>
-              <select
-                className="hcp-select"
-                value={selectedHcpId || ""}
-                onChange={(e) => dispatch(selectHcp(e.target.value))}
-              >
-                <option value="" disabled>
-                  {draftHcp ? `${draftHcp.name} (Drafting...)` : "Select or type name in chat to resolve…"}
-                </option>
-                {hcps.map((h) => (
-                  <option key={h.id} value={h.id}>
-                    {h.name} — {capitalizeSpecialty(h.specialty)}
+              <div style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
+                <select
+                  className="hcp-select"
+                  value={selectedHcpId || ""}
+                  onChange={(e) => dispatch(selectHcp(e.target.value))}
+                  style={{ marginBottom: 0 }}
+                >
+                  <option value="" disabled>
+                    {draftHcp ? `${draftHcp.name} (Drafting...)` : "Select or type name in chat to resolve…"}
                   </option>
-                ))}
-              </select>
+                  {hcps.map((h) => (
+                    <option key={h.id} value={h.id}>
+                      {h.name} — {capitalizeSpecialty(h.specialty)}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={() => setShowModal(true)}
+                  style={{
+                    padding: "0 14px",
+                    height: "41px",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: "20px",
+                    lineHeight: 1,
+                    borderRadius: "8px",
+                  }}
+                  title="Add New Doctor Profile"
+                >
+                  +
+                </button>
+              </div>
 
               {selectedHcp ? (
                 <div className="hcp-profile-info">
@@ -134,6 +165,79 @@ export default function LogInteractionScreen() {
           <ChatInterface selectedHcpId={selectedHcpId} />
         </div>
       </div>
+
+      {showModal && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <h2 style={{ margin: "0 0 16px", fontSize: "18px", fontWeight: "700" }}>Add New HCP Profile</h2>
+            <form onSubmit={handleCreateHcp}>
+              <div className="field">
+                <label>Doctor Name (Required)</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. Dr. Foreman Kumar"
+                  value={newHcpData.name}
+                  onChange={(e) => setNewHcpData({ ...newHcpData, name: e.target.value })}
+                />
+              </div>
+              <div className="field">
+                <label>Specialty</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Neurosurgeon"
+                  value={newHcpData.specialty}
+                  onChange={(e) => setNewHcpData({ ...newHcpData, specialty: e.target.value })}
+                />
+              </div>
+              <div className="field">
+                <label>Institution</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Princeton Plainsboro"
+                  value={newHcpData.institution}
+                  onChange={(e) => setNewHcpData({ ...newHcpData, institution: e.target.value })}
+                />
+              </div>
+              <div className="row-2">
+                <div className="field">
+                  <label>Email</label>
+                  <input
+                    type="email"
+                    placeholder="e.g. email@hospital.com"
+                    value={newHcpData.email}
+                    onChange={(e) => setNewHcpData({ ...newHcpData, email: e.target.value })}
+                  />
+                </div>
+                <div className="field">
+                  <label>Phone</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 123-456-7890"
+                    value={newHcpData.phone}
+                    onChange={(e) => setNewHcpData({ ...newHcpData, phone: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: "10px", justifyContent: "flex-end", marginTop: "24px" }}>
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  onClick={() => {
+                    setShowModal(false);
+                    setNewHcpData({ name: "", specialty: "", institution: "", email: "", phone: "" });
+                  }}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn-primary">
+                  Create Profile
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

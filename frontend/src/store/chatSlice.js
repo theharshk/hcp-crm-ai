@@ -5,11 +5,13 @@ export const sendMessage = createAsyncThunk(
   "chat/sendMessage",
   async ({ message, hcpId }, { getState }) => {
     const state = getState().chat;
+    const interactionsState = getState().interactions;
     const response = await api.sendChatMessage({
       session_id: state.sessionId,
       hcp_id: hcpId || null,
       message,
       history: state.messages.map((m) => ({ role: m.role, content: m.content })),
+      draft_interaction: interactionsState.draftInteraction || null,
     });
     return response;
   }
@@ -51,7 +53,7 @@ const chatSlice = createSlice({
         state.messages.push({
           id: nanoid(),
           role: "assistant",
-          content: `Something went wrong reaching the agent: ${action.error.message}`,
+          content: "I had a momentary hiccup — please send your message again and I'll pick up right where we left off.",
         });
       });
   },

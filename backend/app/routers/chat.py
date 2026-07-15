@@ -12,7 +12,12 @@ def chat_turn(payload: schemas.ChatRequest):
     keeps the running `history` client-side (in Redux) and resends it each
     call, since this is a stateless REST endpoint."""
     history = [{"role": m.role, "content": m.content} for m in (payload.history or [])]
-    result = run_agent_turn(history, payload.message, active_hcp_id=payload.hcp_id)
+    result = run_agent_turn(
+        history, 
+        payload.message, 
+        active_hcp_id=payload.hcp_id,
+        draft_interaction=payload.draft_interaction
+    )
 
     return schemas.ChatResponse(
         session_id=payload.session_id,
