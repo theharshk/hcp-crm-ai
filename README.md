@@ -18,6 +18,79 @@ Here is a detailed breakdown of how the frontend, state management, database sch
 
 ---
 
+## 🗺️ System Workflow & Architecture
+
+Here is a simplified, human-readable breakdown of how the project works, starting with the conversational flow, followed by the high-level architecture.
+
+### 1. Conversational Workflow (How the AI talks to the Rep)
+This sequence diagram shows a real-world example of how the strict step-by-step logic works.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Rep as Field Rep
+    participant UI as Chat Interface
+    participant AI as AI Agent (LangGraph)
+    participant Draft as CRM Database
+
+    Rep->>UI: "I just had a meeting with Dr. Smith."
+    UI->>AI: Sends message to Backend
+    
+    Note over AI,Draft: The Agent checks the 6 required steps in a strict order.
+    
+    AI->>Draft: 1. Updates "Interaction Type" to Meeting
+    
+    AI->>AI: Checks step 2: Is Sentiment filled? (No)
+    AI->>UI: "What was the sentiment of the meeting?"
+    UI->>Rep: Shows question with [Positive] [Neutral] [Negative] buttons
+    
+    Rep->>UI: Clicks [Positive]
+    UI->>AI: Sends sentiment choice
+    AI->>Draft: 2. Updates "Sentiment" to Positive
+    
+    AI->>AI: Checks step 3: Is Topic filled? (No)
+    AI->>UI: "What topic was discussed?"
+    UI->>Rep: Shows question (Requires manual typing)
+    
+    Note over Rep,Draft: This loop continues strictly for Product (4), Notes (5), and Samples (6).
+    
+    Rep->>UI: Completes the remaining steps...
+    UI->>AI: Sends final information
+    AI->>Draft: Marks interaction as Complete
+    AI->>UI: "All details logged successfully!"
+    UI->>Rep: Shows success message and finalized data panel
+```
+
+### 2. High-Level Architecture (How the pieces fit together)
+This flowchart shows the major components of the application.
+
+```mermaid
+graph LR
+    %% Styles
+    classDef user fill:#FF6B6B,stroke:#C92A2A,stroke-width:2px,color:white,font-weight:bold,rx:10,ry:10;
+    classDef ui fill:#4DABF7,stroke:#1971C2,stroke-width:2px,color:white,font-weight:bold,rx:10,ry:10;
+    classDef ai fill:#9775FA,stroke:#6741D9,stroke-width:2px,color:white,font-weight:bold,rx:10,ry:10;
+    classDef db fill:#20C997,stroke:#099268,stroke-width:2px,color:white,font-weight:bold,rx:10,ry:10;
+
+    User((Field Rep)):::user
+    
+    UI["💻 Frontend (React)<br>Chat Window & Live Form"]:::ui
+    
+    AI["🧠 AI Brain (LangGraph & Groq)<br>Understands intent & asks questions"]:::ai
+    
+    DB["🗄️ Database (SQLite)<br>Saves form data securely"]:::db
+    
+    %% Flow
+    User -- "1. Types Message" --> UI
+    UI -- "2. Sends text" --> AI
+    AI -- "3. Extracts Data" --> DB
+    DB -. "4. Live Updates" .-> UI
+    AI -- "5. Replies to user" --> UI
+    UI -- "6. Shows chat & form" --> User
+```
+
+---
+
 ## 📐 Layout & Visual Design
 
 The UI is split side-by-side using a clean CSS grid configured at a `2fr 1fr` proportion:
@@ -90,28 +163,33 @@ The backend agent is built on LangGraph (`backend/app/agent/graph.py`) and is po
   > *"Context: The representative currently has HCP 'Dr. Sanjeev' (UUID: '52970600-...') selected on their screen. Use this UUID as the hcp_id in tool calls when referring to this doctor."*
 * This gives the model direct context of the active doctor on every turn, completely eliminating name-resolution lag and UUID hallucinations.
 
-### 6. Mandatory Validation Checks
-Every logged or edited interaction must have these 4 fields:
-1. **Interaction Type** (exactly `Meeting`, `Video Call`, or `Email`)
-2. **Sentiment** (`positive`, `neutral`, or `negative`)
-3. **Topics Discussed**
-4. **Products Discussed**
+### 6. Mandatory Validation Checks & Strict Question Order
+The agent collects details in a strict sequence:
+1. **Interaction Type** (strictly `Meeting`, `Video Call`, or `Email` options with buttons `[Meeting] [Video Call] [Email]`. Any references to "phone call" or "call" are automatically normalized to `"Video Call"` in our backend).
+2. **Sentiment** (appends quick buttons `[Positive] [Neutral] [Negative]`).
+3. **Topics Discussed** (no quick buttons or suggestions; reps type this manually).
+4. **Products Discussed** (appends the `[No Medication Discussed]` button).
+5. **Detailed Notes** (appends the `[Skip Notes]` button).
+6. **Samples Provided** (appends the `[Skip Samples]` button).
 
 If any of these details are missing from the representative's natural language descriptions, the agent is instructed to **hold back from calling `log_interaction` or `edit_interaction`**. Instead, it halts and asks the user to provide them in chat.
 
 ### 7. Explicit Product Checks & "No Product Discussed" Fallback
 If products are not mentioned in the rep's notes, the agent will explicitly prompt the user in the chat:
-> *"Were any products discussed during the interaction? If yes, please name the products. If no, let me know so I can record 'No Product Discussed'."*
+> *"Were any medications discussed during the interaction? If yes, please name the medications. If no, let me know so I can record 'No Medication Discussed'. [No Medication Discussed]"*
 
-If the user responds with "no", "n/a", "none", or similar:
-* The agent maps this input to `["No Product Discussed"]` for the product parameters.
-* The backend extractor inside `backend/app/agent/tools.py` uses this guideline to set `products_discussed` to `["No Product Discussed"]` in the database.
-* The frontend placeholder for the **Products Discussed** field is updated to `"Products discussed or 'No Product Discussed'"` to match.
+If the user responds with "no", "n/a", "none", or clicks the button:
+* The agent maps this input to `["No Medication Discussed"]` for the product parameters.
+* The backend extractor inside `backend/app/agent/tools.py` defaults to setting `products_discussed` to `["No Medication Discussed"]` in the database.
 
 ### 8. Profile Enrichment & Mandatory Institution
 * After logging or editing an interaction, the agent checks if the doctor's profile is missing an `institution`, `email`, or `phone`.
 * Since `institution` is mandatory, the agent will ask the user to provide it in chat if it's missing.
 * When provided, it calls `enrich_hcp_profile` (supplying the actual UUID from our context injection) and updates the record in PostgreSQL.
+
+### 9. Optimizations and Robustness Fixes
+* **Duplicate Message Prevention**: Resolved an optimistic update double-message bug where user messages were appended twice (once by the frontend and once by the backend turn-builder). The backend now checks if the latest incoming message is already in the effective history, preventing LLM confusion and feedback loops.
+* **Just Add Profile button removal**: Removed the redundant `[Just Add Profile]` button when searching for an HCP that already exists in the database.
 
 ---
 
